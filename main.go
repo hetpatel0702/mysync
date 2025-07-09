@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"path/filepath"
 	"time"
@@ -30,7 +31,12 @@ func main() {
 		log.Fatal("Error resolving src path:", err)
 	}
 
-	dst_dir, err = filepath.Abs(dst_dir)
+	if *remote == "" {
+		dst_dir, err = filepath.Abs(dst_dir)
+	}
+
+	fmt.Println("Source:", src_dir, "Destination:", dst_dir)
+
 	if err != nil {
 		log.Fatal("Error resolving dst path:", err)
 	}

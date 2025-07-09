@@ -14,6 +14,12 @@ import (
 
 func handleRemoteSync(src_dir string, dst_dir string, dryRun *bool, mirror *bool, verbose *bool, remote *string, start time.Time) {
 
+	conn, err := net.Dial("tcp", *remote)
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+
 	filepath.WalkDir(src_dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// Handle error accessing the path
@@ -25,18 +31,30 @@ func handleRemoteSync(src_dir string, dst_dir string, dryRun *bool, mirror *bool
 		src_p := filepath.Join(src_dir, rel_path)
 
 		if d.IsDir() {
-			syncRemote(src_p, dst_p, *remote, d.IsDir())
+			syncRemote(src_p, dst_p, *remote, d.IsDir(), conn)
 			return nil // Continue walking
 		}
 
-		syncRemote(src_p, dst_p, *remote, d.IsDir())
+		syncRemote(src_p, dst_p, *remote, d.IsDir(), conn)
 		return nil
 	})
 
+	closeConnection(conn)
 	fmt.Println("Sync completed in", time.Since(start))
 }
 
-func syncRemote(src_p string, dst_p string, remoteAddr string, isDir bool) {
+func closeConnection(conn net.Conn) {
+	data := []byte("DONE")
+
+	lengthBuf := make([]byte, 4)
+	binary.BigEndian.PutUint32(lengthBuf, uint32(len(data)))
+	conn.Write(lengthBuf)
+
+	conn.Write(data)
+	fmt.Println("Connection closed.")
+}
+
+func syncRemote(src_p string, dst_p string, remoteAddr string, isDir bool, conn net.Conn) {
 	src_f, _ := os.Stat(src_p)
 
 	metaData := FileMeta{
@@ -51,12 +69,6 @@ func syncRemote(src_p string, dst_p string, remoteAddr string, isDir bool) {
 		panic(err)
 	}
 	fmt.Println(string(jsonMetaData))
-
-	conn, err := net.Dial("tcp", remoteAddr)
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
 
 	// Send length of JSON
 	lengthBuf := make([]byte, 4)

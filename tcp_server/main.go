@@ -36,60 +36,62 @@ func main() {
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
-	fmt.Println("Handling connection from:", conn.RemoteAddr())
+	// fmt.Println("Handling connection from:", conn.RemoteAddr())
+	for {
 
-	lenBuf := make([]byte, 4)
-	_, err := io.ReadFull(conn, lenBuf)
-	if err != nil {
-		fmt.Println("Error reading length:", err)
-		return
-	}
-	jsonLen := binary.BigEndian.Uint32(lenBuf)
-	jsonBuf := make([]byte, jsonLen)
-	_, err = io.ReadFull(conn, jsonBuf)
-	if err != nil {
-		fmt.Println("Error reading JSON data:", err)
-		return
-	}
-	fmt.Println("Received JSON data:", string(jsonBuf))
-
-	var meta FileMeta
-	err = json.Unmarshal(jsonBuf, &meta)
-	if err != nil {
-		fmt.Println("Error unmarshalling JSON:", err)
-		return
-	}
-
-	fmt.Printf("Received file metadata: %+v\n", meta)
-
-	f, err := os.Stat(meta.Path)
-
-	if err != nil {
-		if os.IsNotExist(err) {
-			if meta.Dir {
-				err := os.MkdirAll(meta.Path, 0755)
-				if err != nil {
-					fmt.Println("Failed to create directory:", err)
-				}
-				skipFile(conn)
-				return
-			} else {
-				fmt.Println("File does not exist in remote, copying:", meta.Path)
-				getFile(conn, meta)
-			}
+		lenBuf := make([]byte, 4)
+		_, err := io.ReadFull(conn, lenBuf)
+		if err != nil {
+			fmt.Println("Error reading length:", err)
+			return
 		}
-		fmt.Println("Error checking file:", err)
-		return
-	}
+		jsonLen := binary.BigEndian.Uint32(lenBuf)
+		jsonBuf := make([]byte, jsonLen)
+		_, err = io.ReadFull(conn, jsonBuf)
+		if err != nil {
+			fmt.Println("Error reading JSON data:", err)
+			return
+		}
+		fmt.Println("Received JSON data:", string(jsonBuf))
 
-	if f.Size() != meta.Size || f.ModTime().Unix() != meta.ModTime {
-		fmt.Println("File sizes or modification times differ, copying:", meta.Path)
+		if string(jsonBuf) == "DONE" {
+			fmt.Println("Client completed sync")
+			break
+		}
+
+		var meta FileMeta
+		err = json.Unmarshal(jsonBuf, &meta)
+		if err != nil {
+			fmt.Println("Error unmarshalling JSON:", err)
+			return
+		}
+
+		// fmt.Printf("Received file metadata: %+v\n", meta)
+
+		if meta.Dir {
+			err := os.MkdirAll(meta.Path, 0755)
+			if err != nil {
+				fmt.Println("Failed to create directory:", err)
+			}
+			skipFile(conn)
+			continue
+		}
+
+		f, err := os.Stat(meta.Path)
+
+		if err == nil {
+			if f.Size() == meta.Size && f.ModTime().Unix() == meta.ModTime {
+				fmt.Println("File already exists and is up to date:", meta.Path)
+				skipFile(conn)
+				continue
+			}
+			fmt.Println("File differs in remote, copying:", meta.Path, f.ModTime().Unix(), meta.ModTime)
+		} else if !os.IsNotExist(err) {
+			fmt.Println("err")
+			return
+		}
 		getFile(conn, meta)
-	} else {
-		skipFile(conn)
-		fmt.Println("File already exists and is up to date:", meta.Path)
 	}
-
 }
 
 func skipFile(conn net.Conn) {
@@ -100,6 +102,7 @@ func getFile(conn net.Conn, meta FileMeta) {
 	conn.Write([]byte("SEND\n"))
 
 	err := os.MkdirAll(filepath.Dir(meta.Path), 0755)
+	fmt.Println(meta.Path)
 	if err != nil {
 		fmt.Println("Error creating parent dirs:", err)
 		return
@@ -120,5 +123,4 @@ func getFile(conn net.Conn, meta FileMeta) {
 
 	modTime := time.Unix(meta.ModTime, 0)
 	os.Chtimes(meta.Path, modTime, modTime)
-
 }
